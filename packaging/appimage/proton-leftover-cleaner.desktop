@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Proton Leftover Cleaner
+Comment=Remove Proton prefixes and shader caches left behind by uninstalled Steam games
+Exec=proton-leftover-cleaner
+Icon=proton-leftover-cleaner
+Terminal=false
+Categories=Utility;
+Keywords=Steam;Proton;compatdata;shadercache;prefix;cleanup;disk space;

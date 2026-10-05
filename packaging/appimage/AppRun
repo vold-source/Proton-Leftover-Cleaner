@@ -1,0 +1,4 @@
+#!/bin/bash
+# AppImage entry point: start the bundled Proton Leftover Cleaner.
+APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+exec bash "$APPDIR/usr/bin/proton-leftover-cleaner" "$@"
