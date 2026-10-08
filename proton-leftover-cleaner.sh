@@ -15,7 +15,7 @@ set -o pipefail
 shopt -s nullglob
 
 readonly APP_NAME="Proton Leftover Cleaner"
-readonly APP_VERSION="1.0.0"
+readonly APP_VERSION="1.0.1"
 
 # App IDs Steam gives to non-Steam games ("shortcuts") start here.
 readonly FIRST_SHORTCUT_ID=2147483648
@@ -333,8 +333,10 @@ find_leftovers() {
 }
 
 leftover_title() {
-    local id="$1"
-    if (( id == 0 )); then
+    local id="$1" type="$2"
+    if (( id == 0 )) && [[ "$type" == "Proton prefix" ]]; then
+        echo "Shared Proton data (may contain saves)"
+    elif (( id == 0 )); then
         echo "Proton data without a game"
     elif is_shortcut_id "$id"; then
         echo "Removed non-Steam game"
@@ -349,7 +351,7 @@ named_leftovers() {
     local list="$1" id type bytes folder
     load_names_for $(cut -f1 "$list" | sort -un | awk -v max="$FIRST_SHORTCUT_ID" '$1 > 0 && $1 < max')
     while IFS=$'\t' read -r id type bytes folder; do
-        printf '%s\t%s\t%s\t%s\t%s\n' "$(leftover_title "$id")" "$id" "$type" "${bytes:-0}" "$folder"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$(leftover_title "$id" "$type")" "$id" "$type" "${bytes:-0}" "$folder"
     done < "$list" | sort -f -t $'\t' -k1,1 -k2,2n -k3,3
 }
 
@@ -435,9 +437,12 @@ clean_leftovers_gui() {
     fi
 
     local -a rows=() paths=() sizes=()
-    local name id type bytes folder total=0 n=0
+    local name id type bytes folder total=0 n=0 tick
     while IFS=$'\t' read -r name id type bytes folder; do
-        rows+=(TRUE "$name" "$id" "$type" "$(pretty_size "$bytes")" "$n")
+        # compatdata/0 can hold saves of non-Steam games, so it's only removed when picked.
+        tick=TRUE
+        (( id == 0 )) && [[ "$type" == "Proton prefix" ]] && tick=FALSE
+        rows+=("$tick" "$name" "$id" "$type" "$(pretty_size "$bytes")" "$n")
         paths+=("$folder")
         sizes+=("$bytes")
         total=$((total + bytes))
@@ -447,20 +452,22 @@ clean_leftovers_gui() {
     local picked
     picked=$(zenity --list --checklist \
         --title="Leftovers found" \
-        --text="$n item(s), $(pretty_size "$total") in total.\nEverything is selected — untick what you want to keep." \
+        --text="$n item(s), $(pretty_size "$total") in total.\nEverything except shared Proton data is selected — untick what you want to keep." \
         --column="Remove" --column="Game" --column="App ID" --column="Data" --column="Size" --column="n" \
         --hide-column=6 --print-column=6 --separator=" " \
         --width=720 --height=620 \
         "${rows[@]}") || return 0
 
     local -a chosen=()
-    local i selected_bytes=0 prefixes=0 shortcut_prefixes=0
+    local i selected_bytes=0 prefixes=0 shortcut_prefixes=0 shared_prefix=0
     for i in $picked; do
         [[ "$i" =~ ^[0-9]+$ && -n "${paths[$i]}" ]] || continue
         chosen+=("$i")
         selected_bytes=$((selected_bytes + sizes[i]))
         if [[ "${paths[$i]}" == */compatdata/* ]]; then
-            if is_shortcut_id "${paths[$i]##*/}"; then
+            if [[ "${paths[$i]##*/}" =~ ^0+$ ]]; then
+                shared_prefix=1
+            elif is_shortcut_id "${paths[$i]##*/}"; then
                 shortcut_prefixes=$((shortcut_prefixes + 1))
             else
                 prefixes=$((prefixes + 1))
@@ -475,6 +482,7 @@ clean_leftovers_gui() {
     local message="Remove ${#chosen[@]} item(s) and free $(pretty_size "$selected_bytes")?"
     (( prefixes > 0 )) && message+="\n\n$prefixes Proton prefix(es) selected. Games often keep save files there; saves that aren't in Steam Cloud will be gone for good."
     (( shortcut_prefixes > 0 )) && message+="\n\n$shortcut_prefixes prefix(es) of removed non-Steam games selected. If a game was installed inside its prefix, the game itself is removed too."
+    (( shared_prefix > 0 )) && message+="\n\nShared Proton data (compatdata/0) selected. It can hold save files of non-Steam games; those will be gone for good."
     ask "$message" "Remove" || return 0
 
     local freed=0

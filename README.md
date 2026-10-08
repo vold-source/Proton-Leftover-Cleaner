@@ -11,9 +11,9 @@ Uninstalling a game often leaves both behind. Over time they can add up to many 
 
 ## Features
 
-- **Leftovers of uninstalled games:** lists every Proton prefix and shader cache whose game isn't installed anymore, with name, App ID, type and size. Everything is preselected. Untick what you want to keep, confirm, done.
+- **Leftovers of uninstalled games:** lists every Proton prefix and shader cache whose game isn't installed anymore, with name, App ID, type and size. Everything is preselected (except the shared `compatdata/0` folder, see below). Untick what you want to keep, confirm, done.
 - **Removed non-Steam games:** data of non-Steam games you've removed from Steam is found too. Non-Steam games that are still in your library are never touched.
-- **Proton data without a game:** the `compatdata/0` folder that sometimes appears is listed as well.
+- **Proton data without a game:** the `compatdata/0` folder that sometimes appears is listed as well, but left unticked. Non-Steam games can end up keeping their saves there, so check it before removing it.
 - **Data of an installed game:** reset the shader cache and/or Proton prefix of a game that's still installed, for example to fix a game that stopped starting. Steam recreates them on the next launch.
 - **Finds all your libraries:** reads Steam's own list of libraries, so internal drives, external drives, SD cards and custom folders all work, with regular and Flatpak Steam.
 - **Works offline:** game names come from Steam's local cache. Nothing is sent anywhere.
