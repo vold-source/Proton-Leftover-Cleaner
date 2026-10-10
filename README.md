@@ -7,7 +7,7 @@ When Steam runs a Windows game on Linux through Proton, it creates two folders f
 
 Uninstalling a game often leaves both behind, and sometimes part of the game's install folder too (`steamapps/common/<game>`): Steam only deletes the files it downloaded, so mods, mod settings, logs and caches created later stay there. Over time they can add up to many gigabytes. Proton Leftover Cleaner finds them, tells you which game they belonged to and how big they are, and removes the ones you select.
 
-![Proton Leftover Cleaner main window](docs/screenshot.png)
+![The main window: choose between leftovers of uninstalled games and data of an installed game](docs/main-menu.png)
 
 ## Features
 
@@ -53,7 +53,18 @@ chmod +x proton-leftover-cleaner.sh
 
 Start the app and choose:
 
-1. **Leftovers of uninstalled games:** the app scans your libraries and shows what it found. Untick anything you want to keep and click OK. You'll see how much space will be freed before anything is removed.
+1. **Leftovers of uninstalled games:** the app scans your libraries and shows what it found. Untick anything you want to keep and click OK.
+
+   ![The list of leftovers found, with the shared Proton data unticked and a leftover game folder ticked](docs/leftovers-found.png)
+
+   Before anything is removed, you'll see how much space will be freed, plus a note about anything that might hold mods or saves:
+
+   ![The confirmation before removing, showing how much space will be freed](docs/confirm-removal.png)
+
+   Once it's done, the app tells you how much space was freed:
+
+   ![The message after removing, showing how much space was freed](docs/removal-done.png)
+
 2. **Data of an installed game:** pick a game, then choose to remove its shader cache, its Proton prefix, or both.
 
 In a terminal:
