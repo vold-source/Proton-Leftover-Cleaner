@@ -4,20 +4,35 @@
 #
 # Steam keeps a Proton prefix (steamapps/compatdata/<id>) and a shader cache
 # (steamapps/shadercache/<id>) for every game it runs through Proton, and it
-# often leaves them behind when a game is uninstalled. This tool finds those
-# leftovers and removes the ones you pick. It can also reset the Proton prefix
-# and/or shader cache of a game that is still installed.
+# often leaves them behind when a game is uninstalled. Files a game or mod
+# created in its install folder (steamapps/common/<game>) stay behind too.
+# This tool finds those leftovers and removes the ones you pick. It can also
+# reset the Proton prefix and/or shader cache of a game that is still installed.
 #
 # This is free and unencumbered software released into the public domain.
 # See the LICENSE file or <https://unlicense.org> for details.
 
+# How the script is laid out (top to bottom):
+#   1. Settings and small helpers
+#   2. Reading Steam's files: where Steam and its libraries are, which games are
+#      installed, game names, and which non-Steam games exist
+#   3. Finding leftovers: folders that belong to no installed game
+#   4. The terminal mode (--list), which only lists and never deletes
+#   5. The graphical mode (zenity windows), the only place anything is deleted
+#   6. Start: reads the command line options and runs one of the two modes
+
+# A failing command anywhere in a pipe (a | b) counts as a failure.
 set -o pipefail
+# A pattern like "folder/*" that matches nothing expands to nothing, instead of
+# staying as the literal text "folder/*" (which would look like a real folder).
 shopt -s nullglob
 
 readonly APP_NAME="Proton Leftover Cleaner"
-readonly APP_VERSION="1.0.1"
+readonly APP_VERSION="1.1.0"
 
-# App IDs Steam gives to non-Steam games ("shortcuts") start here.
+# App IDs Steam gives to non-Steam games ("shortcuts") start here. They don't
+# appear in any appmanifest, so they're checked against Steam's shortcut list
+# instead (see read_current_shortcuts).
 readonly FIRST_SHORTCUT_ID=2147483648
 
 # Where Steam can be installed (regular package and Flatpak).
@@ -33,6 +48,7 @@ readonly STEAM_LOCATIONS=(
 # Small helpers
 ###############################################################################
 
+# Prints an error message and stops the script.
 die() {
     echo "$APP_NAME: $*" >&2
     exit 1
@@ -44,10 +60,13 @@ pretty_size() {
         | sed -E 's/^([0-9.]+)([KMGTPE])$/\1 \2B/; s/^([0-9.]+)$/\1 B/; s/^([0-9]+)\.0 B$/\1 B/'
 }
 
+# Total size of a folder in bytes (empty if it doesn't exist).
 folder_bytes() {
     du -sb -- "$1" 2>/dev/null | cut -f1
 }
 
+# True if an App ID belongs to a non-Steam game. "10#" makes bash read IDs
+# like "0123" as decimal instead of octal.
 is_shortcut_id() {
     (( 10#$1 >= FIRST_SHORTCUT_ID ))
 }
@@ -65,13 +84,18 @@ real_path() {
 declare -a steam_installs=()    # Steam folders found on this computer
 declare -a libraries=()         # "steamapps" folders of all libraries
 declare -a offline_libraries=() # libraries Steam knows about that aren't reachable
-declare -A known_paths=()
+declare -A known_paths=()      # "kind:path" -> 1, so nothing is added twice
 
 # Values of a key in a text VDF/ACF file, e.g. vdf_values path libraryfolders.vdf
+# Those files are made of lines like:   "key"   "value"
+# Splitting on quotes makes the key field 2 and the value field 4. Steam writes
+# backslashes doubled, so they're turned back into single ones.
 vdf_values() {
     awk -F'"' -v key="$1" 'tolower($2) == key { v = $4; gsub(/\\\\/, "\\", v); print v }' "$2" 2>/dev/null
 }
 
+# Adds <folder>/steamapps to the list of libraries if it exists.
+# Returns failure if it doesn't, so callers can tell a library is offline.
 add_library_folder() {
     local folder="$1" apps real
     apps=$(real_path "$folder/steamapps") || return 1
@@ -81,6 +105,10 @@ add_library_folder() {
     libraries+=("$apps")
 }
 
+# Fills steam_installs and libraries. Steam's own library list
+# (libraryfolders.vdf) names every library, including ones on other drives.
+# Libraries in that list that can't be reached go into offline_libraries, so
+# the user can be warned: games installed there would look uninstalled.
 find_steam() {
     local location install folder list
 
@@ -113,16 +141,28 @@ find_steam() {
 
 declare -A installed_name=()   # App ID -> name, for everything installed
 declare -A is_game=()          # App ID -> 1 for real games (not Proton etc.)
+declare -A claimed_folder=()   # steamapps/common/<folder> -> 1 if an installed app uses it
+declare -A has_manifests=()    # steamapps folder -> 1 if any app is installed there
 
+# Steam writes one appmanifest_<App ID>.acf per installed app into the library
+# that holds it. These files are the single source of truth for what's
+# installed: anything without one counts as uninstalled. The manifest's
+# "installdir" names the app's folder in steamapps/common.
 read_installed_apps() {
-    local apps manifest id name
+    local apps manifest id name installdir
     for apps in "${libraries[@]}"; do
         for manifest in "$apps"/appmanifest_*.acf; do
             id=${manifest##*/appmanifest_}
             id=${id%.acf}
             [[ "$id" =~ ^[0-9]+$ ]] || continue
+            has_manifests[$apps]=1
             name=$(vdf_values name "$manifest" | head -n 1)
             installed_name[$id]="${name:-App $id}"
+            while IFS= read -r installdir; do
+                [[ -n "$installdir" ]] && claimed_folder[$apps/common/$installdir]=1
+            done < <(vdf_values installdir "$manifest")
+            # Proton versions and Steam's runtimes are installed like games, but
+            # they shouldn't be offered under "Data of an installed game".
             case "$name" in
                 Proton\ *|Proton-*|Steam\ Linux\ Runtime*|Steamworks\ Common\ Redistributables*|Steamworks\ Shared*) ;;
                 *) is_game[$id]=1 ;;
@@ -131,7 +171,10 @@ read_installed_apps() {
     done
 }
 
-# Python helper for Steam's binary files. Commands:
+# Python helper for Steam's binary files. Bash can't read binary data well,
+# so this small Python program is embedded here and run with python3.
+# If python3 is missing, names are skipped and non-Steam data is left alone.
+# Commands:
 #   names <appinfo.vdf> <id>...   prints "id<TAB>name" from Steam's app cache
 #   shortcuts <shortcuts.vdf>...  prints the App ID of every non-Steam game
 read -r -d '' STEAM_BINARY_HELPER <<'PYTHON'
@@ -141,7 +184,12 @@ import zlib
 
 
 class BinaryKeyValues:
-    """Reader for Valve's binary key/value format."""
+    """Reader for Valve's binary key/value format.
+
+    Each entry is one type byte, a key, then a value. Type 0x00 starts a nested
+    section, 0x01 is text, 0x02 a 32-bit number, 0x08/0x0B end a section. Other
+    types are skipped because nothing here needs them.
+    """
 
     END_MARKERS = (0x08, 0x0B)
 
@@ -257,12 +305,13 @@ if __name__ == "__main__":
         shortcut_ids(arguments)  # errors make the exit code non-zero
 PYTHON
 
+# Runs the Python helper above. Fails if python3 isn't installed.
 steam_binary_helper() {
     command -v python3 >/dev/null 2>&1 || return 1
     python3 -c "$STEAM_BINARY_HELPER" "$@" 2>/dev/null
 }
 
-declare -A game_name_cache=()
+declare -A game_name_cache=()  # App ID -> name, for games that aren't installed
 
 # Looks up names of games that are no longer installed (offline, from Steam's cache).
 load_names_for() {
@@ -277,8 +326,8 @@ load_names_for() {
     done < <(steam_binary_helper names "$cache" "$@")
 }
 
-declare -A current_shortcuts=()
-shortcuts_known=false
+declare -A current_shortcuts=() # App ID -> 1 for non-Steam games still in Steam
+shortcuts_known=false            # true once that list was read successfully
 
 # Reads which non-Steam games are currently added to Steam. If that can't be
 # done reliably, shortcuts_known stays false and non-Steam data is left alone.
@@ -305,8 +354,20 @@ read_current_shortcuts() {
 # Finding leftovers
 ###############################################################################
 
+# The rules for what counts as a leftover:
+#   - compatdata/<id> and shadercache/<id>: leftover if no installed app has
+#     that App ID.
+#   - ID 0: Proton sometimes creates compatdata/0 and shadercache/0. They
+#     belong to no game, so they're always listed (compatdata/0 unticked,
+#     since non-Steam games can keep saves there).
+#   - Non-Steam game IDs: leftover only if the game was removed from Steam.
+#     If Steam's shortcut list couldn't be read, they're never listed.
+#   - steamapps/common/<folder>: leftover if no installed app's appmanifest
+#     names it as its "installdir".
+#
 # Prints one line per leftover folder:
-#   <App ID> TAB <"Proton prefix"|"Shader cache"> TAB <bytes> TAB <path>
+#   <App ID> TAB <"Proton prefix"|"Shader cache"|"Game folder"> TAB <bytes> TAB <path>
+# Game folders have no App ID; theirs is "-".
 find_leftovers() {
     local apps type folder id
     for apps in "${libraries[@]}"; do
@@ -315,7 +376,7 @@ find_leftovers() {
                 folder=${folder%/}
                 id=${folder##*/}
                 [[ "$id" =~ ^[0-9]+$ ]] || continue
-                id=$((10#$id))
+                id=$((10#$id))   # "0042" -> 42
                 if (( id == 0 )); then
                     :   # Proton data that belongs to no game at all
                 elif is_shortcut_id "$id"; then
@@ -329,12 +390,24 @@ find_leftovers() {
                     "$(folder_bytes "$folder")" "$folder"
             done
         done
+
+        # Install folders no installed game uses anymore. A library without a
+        # single installed app is skipped, in case Steam's files there can't be read.
+        [[ -n "${has_manifests[$apps]}" ]] || continue
+        for folder in "$apps/common"/*/; do
+            folder=${folder%/}
+            [[ -n "${claimed_folder[$folder]}" ]] && continue
+            printf '%s\t%s\t%s\t%s\n' "-" "Game folder" "$(folder_bytes "$folder")" "$folder"
+        done
     done
 }
 
+# The name shown for a leftover in the list.
 leftover_title() {
-    local id="$1" type="$2"
-    if (( id == 0 )) && [[ "$type" == "Proton prefix" ]]; then
+    local id="$1" type="$2" folder="$3"
+    if [[ "$type" == "Game folder" ]]; then
+        echo "${folder##*/}"
+    elif (( id == 0 )) && [[ "$type" == "Proton prefix" ]]; then
         echo "Shared Proton data (may contain saves)"
     elif (( id == 0 )); then
         echo "Proton data without a game"
@@ -349,9 +422,9 @@ leftover_title() {
 #   <name> TAB <App ID> TAB <type> TAB <bytes> TAB <path>
 named_leftovers() {
     local list="$1" id type bytes folder
-    load_names_for $(cut -f1 "$list" | sort -un | awk -v max="$FIRST_SHORTCUT_ID" '$1 > 0 && $1 < max')
+    load_names_for $(cut -f1 "$list" | sort -un | awk -v max="$FIRST_SHORTCUT_ID" '$1 ~ /^[0-9]+$/ && $1 > 0 && $1 < max')
     while IFS=$'\t' read -r id type bytes folder; do
-        printf '%s\t%s\t%s\t%s\t%s\n' "$(leftover_title "$id" "$type")" "$id" "$type" "${bytes:-0}" "$folder"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$(leftover_title "$id" "$type" "$folder")" "$id" "$type" "${bytes:-0}" "$folder"
     done < "$list" | sort -f -t $'\t' -k1,1 -k2,2n -k3,3
 }
 
@@ -359,6 +432,7 @@ named_leftovers() {
 # Command line mode: --list
 ###############################################################################
 
+# --list: prints every leftover with its size and path. Deletes nothing.
 list_in_terminal() {
     local list name id type bytes folder total=0 count=0
     list=$(mktemp) || die "could not create a temporary file"
@@ -390,18 +464,24 @@ list_in_terminal() {
 ###############################################################################
 
 # Hide zenity's harmless GTK layout warnings, keep everything else.
+# This function has the same name as the zenity program, so every "zenity"
+# below goes through it. "command zenity" skips the function and runs the real
+# program; without "command" it would call itself forever.
 zenity() {
     command zenity "$@" 2> >(grep -Ev '^\(zenity:[0-9]+\): [A-Za-z]+-WARNING \*\*|^$' >&2)
 }
 
+# Shortcuts for the three kinds of message windows.
 notice() { zenity --info --title="$APP_NAME" --width=420 --text="$1"; }
 problem() { zenity --error --title="$APP_NAME" --width=480 --text="$1"; }
 ask() {  # ask "<text>" "<yes button>"
     zenity --question --title="$APP_NAME" --width=460 --ok-label="$2" --cancel-label="Cancel" --text="$1"
 }
 
+# Folders that couldn't be deleted (for example because of permissions).
 declare -a not_removed=()
 
+# Deletes a folder permanently (no trash). Failures are collected in not_removed.
 remove_folder() {
     [[ -d "$1" ]] || return 1
     rm -rf -- "$1" && return 0
@@ -413,10 +493,14 @@ report_not_removed() {
     problem "These folders could not be removed:\n\n$(printf '%s\n' "${not_removed[@]}")"
 }
 
+# True if Steam is open (pgrep -x looks for a process named exactly "steam").
 steam_is_running() {
     pgrep -x steam >/dev/null 2>&1
 }
 
+# "Leftovers of uninstalled games": scan, show a checklist, ask once more,
+# then delete what was picked. Rows are numbered (hidden column "n") so the
+# checklist answer can be matched back to paths[], sizes[] and types[].
 clean_leftovers_gui() {
     local workdir="$1" list="$1/leftovers"
 
@@ -436,15 +520,16 @@ clean_leftovers_gui() {
         return 0
     fi
 
-    local -a rows=() paths=() sizes=()
+    local -a rows=() paths=() sizes=() types=()
     local name id type bytes folder total=0 n=0 tick
     while IFS=$'\t' read -r name id type bytes folder; do
         # compatdata/0 can hold saves of non-Steam games, so it's only removed when picked.
         tick=TRUE
-        (( id == 0 )) && [[ "$type" == "Proton prefix" ]] && tick=FALSE
+        [[ "$type" == "Proton prefix" ]] && (( id == 0 )) && tick=FALSE
         rows+=("$tick" "$name" "$id" "$type" "$(pretty_size "$bytes")" "$n")
         paths+=("$folder")
         sizes+=("$bytes")
+        types+=("$type")
         total=$((total + bytes))
         n=$((n + 1))
     done < <(named_leftovers "$list")
@@ -459,12 +544,14 @@ clean_leftovers_gui() {
         "${rows[@]}") || return 0
 
     local -a chosen=()
-    local i selected_bytes=0 prefixes=0 shortcut_prefixes=0 shared_prefix=0
+    local i selected_bytes=0 prefixes=0 shortcut_prefixes=0 shared_prefix=0 game_folders=0
     for i in $picked; do
         [[ "$i" =~ ^[0-9]+$ && -n "${paths[$i]}" ]] || continue
         chosen+=("$i")
         selected_bytes=$((selected_bytes + sizes[i]))
-        if [[ "${paths[$i]}" == */compatdata/* ]]; then
+        if [[ "${types[$i]}" == "Game folder" ]]; then
+            game_folders=$((game_folders + 1))
+        elif [[ "${paths[$i]}" == */compatdata/* ]]; then
             if [[ "${paths[$i]##*/}" =~ ^0+$ ]]; then
                 shared_prefix=1
             elif is_shortcut_id "${paths[$i]##*/}"; then
@@ -482,6 +569,7 @@ clean_leftovers_gui() {
     local message="Remove ${#chosen[@]} item(s) and free $(pretty_size "$selected_bytes")?"
     (( prefixes > 0 )) && message+="\n\n$prefixes Proton prefix(es) selected. Games often keep save files there; saves that aren't in Steam Cloud will be gone for good."
     (( shortcut_prefixes > 0 )) && message+="\n\n$shortcut_prefixes prefix(es) of removed non-Steam games selected. If a game was installed inside its prefix, the game itself is removed too."
+    (( game_folders > 0 )) && message+="\n\n$game_folders game folder(s) selected. These hold what was added after installing, like mods, mod settings or logs, and sometimes saves."
     (( shared_prefix > 0 )) && message+="\n\nShared Proton data (compatdata/0) selected. It can hold save files of non-Steam games; those will be gone for good."
     ask "$message" "Remove" || return 0
 
@@ -497,6 +585,8 @@ clean_leftovers_gui() {
     fi
 }
 
+# "Data of an installed game": pick a game, then remove its shader cache,
+# its Proton prefix, or both. Steam recreates them on the next launch.
 clean_installed_game_gui() {
     local workdir="$1" sizes_file="$1/sizes"
     local id
@@ -581,6 +671,8 @@ clean_installed_game_gui() {
     fi
 }
 
+# The main window. A temporary folder holds scan results while the app runs;
+# the "trap ... EXIT" line deletes it again when the script ends.
 run_gui() {
     type -P zenity >/dev/null || {   # (type -P: the real program, not the wrapper above)
         command -v notify-send >/dev/null 2>&1 && notify-send "$APP_NAME" "Please install zenity to use $APP_NAME."
@@ -617,7 +709,7 @@ case "${1:-}" in
     -h|--help)
         cat <<EOF
 $APP_NAME $APP_VERSION
-Finds and removes Proton prefixes and shader caches left behind by Steam games.
+Finds and removes Proton prefixes, shader caches and game folders left behind by Steam games.
 
 Usage: ${0##*/} [option]
 
@@ -635,6 +727,8 @@ EOF
         die "unknown option '$1' (see --help)" ;;
 esac
 
+# Both modes need the same information first: where Steam and its libraries
+# are, which apps are installed, and which non-Steam games exist.
 find_steam
 read_installed_apps
 read_current_shortcuts

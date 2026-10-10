@@ -5,13 +5,14 @@ When Steam runs a Windows game on Linux through Proton, it creates two folders f
 - a **Proton prefix** (`steamapps/compatdata/<App ID>`): the game's own little Windows installation, with its settings and often its save files
 - a **shader cache** (`steamapps/shadercache/<App ID>`): precompiled graphics shaders
 
-Uninstalling a game often leaves both behind. Over time they can add up to many gigabytes. Proton Leftover Cleaner finds them, tells you which game they belonged to and how big they are, and removes the ones you select.
+Uninstalling a game often leaves both behind, and sometimes part of the game's install folder too (`steamapps/common/<game>`): Steam only deletes the files it downloaded, so mods, mod settings, logs and caches created later stay there. Over time they can add up to many gigabytes. Proton Leftover Cleaner finds them, tells you which game they belonged to and how big they are, and removes the ones you select.
 
 ![Proton Leftover Cleaner main window](docs/screenshot.png)
 
 ## Features
 
 - **Leftovers of uninstalled games:** lists every Proton prefix and shader cache whose game isn't installed anymore, with name, App ID, type and size. Everything is preselected (except the shared `compatdata/0` folder, see below). Untick what you want to keep, confirm, done.
+- **Leftover game folders:** install folders in `steamapps/common` that no installed game uses anymore are listed as "Game folder" and preselected too. They usually hold mods, logs or caches, but occasionally saves, so have a look if you're unsure.
 - **Removed non-Steam games:** data of non-Steam games you've removed from Steam is found too. Non-Steam games that are still in your library are never touched.
 - **Proton data without a game:** the `compatdata/0` folder that sometimes appears is listed as well, but left unticked. Non-Steam games can end up keeping their saves there, so check it before removing it.
 - **Data of an installed game:** reset the shader cache and/or Proton prefix of a game that's still installed, for example to fix a game that stopped starting. Steam recreates them on the next launch.
@@ -69,6 +70,7 @@ proton-leftover-cleaner.sh --help
 - **Non-Steam games installed inside their prefix:** removing such a leftover removes the game files as well.
 - **Steam running:** before resetting the data of an installed game, the app warns you if Steam is running. Close the game first.
 - **Drives that aren't connected:** if one of your Steam libraries is on a drive that isn't plugged in, its games look uninstalled. The app warns you about this before scanning.
+- **Game folders:** a leftover game folder can hold mods or their settings you may want to keep for a reinstall, and a few games keep saves there.
 - Shader caches are always safe to remove. Steam rebuilds them when needed.
 
 ## Building the AppImage
