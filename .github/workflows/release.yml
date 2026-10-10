@@ -1,0 +1,56 @@
+# Publishes a GitHub release whenever a version tag (like v1.2.0) is pushed.
+#
+# What it does, step by step:
+#   1. Checks that the tag matches APP_VERSION in proton-leftover-cleaner.sh,
+#      so a release can never carry the wrong version number.
+#   2. Builds the AppImage with packaging/appimage/build.sh.
+#   3. Creates the release "Proton Leftover Cleaner X.Y.Z", uses the tag's
+#      message as the release notes, attaches the three build files and
+#      marks it as the latest release (AppImage updaters look there).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches APP_VERSION
+        run: |
+          version="$(sed -n 's/^readonly APP_VERSION="\(.*\)"$/\1/p' proton-leftover-cleaner.sh)"
+          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+              echo "Tag $GITHUB_REF_NAME does not match APP_VERSION $version" >&2
+              exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the AppImage
+        run: bash packaging/appimage/build.sh
+
+      - name: Read the release notes from the tag message
+        run: |
+          # The checkout step may drop the tag's message, so fetch the tag again.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > notes.md
+          cat notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+              --title "Proton Leftover Cleaner $VERSION" \
+              --notes-file notes.md \
+              --latest \
+              build/Proton_Leftover_Cleaner-"$VERSION"-x86_64.AppImage \
+              build/Proton_Leftover_Cleaner-"$VERSION"-x86_64.AppImage.sha256 \
+              build/Proton_Leftover_Cleaner-"$VERSION"-x86_64.AppImage.zsync
