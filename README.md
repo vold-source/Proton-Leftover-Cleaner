@@ -11,7 +11,7 @@ Uninstalling a game often leaves both behind, and sometimes part of the game's i
 
 ## Features
 
-- **Leftovers of uninstalled games:** lists every Proton prefix and shader cache whose game isn't installed anymore, with name, App ID, type and size. Everything is preselected (except the shared `compatdata/0` folder, see below). Untick what you want to keep, confirm, done.
+- **Leftovers of uninstalled games:** lists every Proton prefix and shader cache whose game isn't installed anymore, with name, App ID, type and size. Everything is preselected (except the shared `compatdata/0` folder, see below, and Steam's own "Steam Controller Configs" folder, which holds controller layouts). Untick what you want to keep, confirm, done.
 - **Leftover game folders:** install folders in `steamapps/common` that no installed game uses anymore are listed as "Game folder" and preselected too. They usually hold mods, logs or caches, but occasionally saves, so have a look if you're unsure.
 - **Removed non-Steam games:** data of non-Steam games you've removed from Steam is found too. Non-Steam games that are still in your library are never touched.
 - **Proton data without a game:** the `compatdata/0` folder that sometimes appears is listed as well, but left unticked. Non-Steam games can end up keeping their saves there, so check it before removing it.

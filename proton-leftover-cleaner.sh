@@ -28,7 +28,7 @@ set -o pipefail
 shopt -s nullglob
 
 readonly APP_NAME="Proton Leftover Cleaner"
-readonly APP_VERSION="1.1.0"
+readonly APP_VERSION="1.1.1"
 
 # App IDs Steam gives to non-Steam games ("shortcuts") start here. They don't
 # appear in any appmanifest, so they're checked against Steam's shortcut list
@@ -526,6 +526,9 @@ clean_leftovers_gui() {
         # compatdata/0 can hold saves of non-Steam games, so it's only removed when picked.
         tick=TRUE
         [[ "$type" == "Proton prefix" ]] && (( id == 0 )) && tick=FALSE
+        # "Steam Controller Configs" is Steam's own folder for controller layouts,
+        # not a game, so it's listed but only removed when picked.
+        [[ "$type" == "Game folder" && "${folder##*/}" == "Steam Controller Configs" ]] && tick=FALSE
         rows+=("$tick" "$name" "$id" "$type" "$(pretty_size "$bytes")" "$n")
         paths+=("$folder")
         sizes+=("$bytes")
@@ -537,7 +540,7 @@ clean_leftovers_gui() {
     local picked
     picked=$(zenity --list --checklist \
         --title="Leftovers found" \
-        --text="$n item(s), $(pretty_size "$total") in total.\nEverything except shared Proton data is selected — untick what you want to keep." \
+        --text="$n item(s), $(pretty_size "$total") in total.\nEverything except shared Proton data and Steam Controller Configs is selected — untick what you want to keep." \
         --column="Remove" --column="Game" --column="App ID" --column="Data" --column="Size" --column="n" \
         --hide-column=6 --print-column=6 --separator=" " \
         --width=720 --height=620 \
