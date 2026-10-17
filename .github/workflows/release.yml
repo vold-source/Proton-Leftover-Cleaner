@@ -1,4 +1,8 @@
 # Publishes a GitHub release whenever a version tag (like v1.2.0) is pushed.
+# It can also be started by hand ("Run workflow" on the Actions page, or by
+# Claude through GitHub) with the release notes typed in. Then the tag is
+# made from APP_VERSION on the chosen branch. This exists because Claude's
+# cloud sessions can push branches but not tags.
 #
 # What it does, step by step:
 #   1. Checks that the tag matches APP_VERSION in proton-leftover-cleaner.sh,
@@ -14,6 +18,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Release notes"
+        required: true
 
 permissions:
   contents: write
@@ -25,19 +34,36 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check that the tag matches APP_VERSION
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^readonly APP_VERSION="\(.*\)"$/\1/p' proton-leftover-cleaner.sh)"
-          if [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              # Started by hand: the tag is new and named after APP_VERSION.
+              if gh release view "v$version" > /dev/null 2>&1; then
+                  echo "Release v$version already exists" >&2
+                  exit 1
+              fi
+              echo "TAG=v$version" >> "$GITHUB_ENV"
+          elif [[ "v$version" != "$GITHUB_REF_NAME" ]]; then
               echo "Tag $GITHUB_REF_NAME does not match APP_VERSION $version" >&2
               exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
 
       - name: Build the AppImage
         run: bash packaging/appimage/build.sh
 
       - name: Read the release notes from the tag message
+        env:
+          NOTES: ${{ inputs.notes }}
         run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              printf '%s\n' "$NOTES" > notes.md
+              cat notes.md
+              exit 0
+          fi
           # The checkout step may drop the tag's message, so fetch the tag again.
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           git for-each-ref --format='%(contents)' "refs/tags/$GITHUB_REF_NAME" > notes.md
@@ -47,7 +73,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
               --title "Proton Leftover Cleaner $VERSION" \
               --notes-file notes.md \
               --latest \
