@@ -4,6 +4,8 @@
 [![Release](https://github.com/vold-source/Proton-Leftover-Cleaner/actions/workflows/release.yml/badge.svg)](https://github.com/vold-source/Proton-Leftover-Cleaner/actions/workflows/release.yml)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue)](LICENSE)
 
+> **Personal project.** I made this for my own use and share it as is. I don't offer support or take feature requests, but you're welcome to use it or fork it.
+
 Finds and removes the Proton prefixes, shader caches and game folders that Steam leaves behind on Linux after you uninstall a game.
 
 - **Shows what it found first:** every leftover is listed with the game's name, what kind of data it is and how big it is. Nothing is removed until you confirm.
