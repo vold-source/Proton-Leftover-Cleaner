@@ -7,8 +7,9 @@
 # What it does, step by step:
 #   1. Checks that the tag matches APP_VERSION in proton-leftover-cleaner.sh,
 #      so a release can never carry the wrong version number.
-#   2. Builds the AppImage with packaging/appimage/build.sh.
-#   3. Creates the release "Proton Leftover Cleaner X.Y.Z", uses the tag's
+#   2. Runs the safety tests (tests/run-tests.sh); a failing test stops the release.
+#   3. Builds the AppImage with packaging/appimage/build.sh.
+#   4. Creates the release "Proton Leftover Cleaner X.Y.Z", uses the tag's
 #      message as the release notes, attaches the three build files and
 #      marks it as the latest release (AppImage updaters look there).
 
@@ -51,6 +52,9 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
           [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || echo "TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+
+      - name: Run the safety tests
+        run: bash tests/run-tests.sh
 
       - name: Build the AppImage
         run: bash packaging/appimage/build.sh

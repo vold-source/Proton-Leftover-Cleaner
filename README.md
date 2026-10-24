@@ -76,8 +76,8 @@ Once it's done, the app tells you how much space was freed:
 |---|---|---|
 | Proton prefix of an uninstalled game | ticked | May contain saves that aren't in Steam Cloud |
 | Shader cache of an uninstalled game | ticked | Always safe; Steam rebuilds it when needed |
-| Game folder (`steamapps/common`) no installed game uses | ticked | Usually mods, logs or caches, occasionally saves |
-| Data of a non-Steam game you removed from Steam | ticked | Non-Steam games still in your library are never touched |
+| Game folder (`steamapps/common`) no installed game uses | ticked | Usually mods, logs or caches, occasionally saves. Games you copied there yourself show up here too |
+| Data of a non-Steam game you removed from Steam | ticked | Non-Steam games still in your library are never touched. Skipped entirely if Steam's list of non-Steam games is missing or can't be read |
 | Shared Proton data (`compatdata/0`) | unticked | Non-Steam games can keep their saves here |
 | Steam Controller Configs | unticked | Steam's own controller layouts |
 
@@ -101,8 +101,9 @@ The AppImage accepts the same options.
 - **Removal is permanent:** removed folders are deleted right away, not moved to the trash. There's no undo.
 - **Save files:** many games store their saves inside the Proton prefix. Removing it deletes saves that aren't synced with Steam Cloud. Back them up first if you're unsure.
 - **Non-Steam games installed inside their prefix:** removing such a leftover removes the game files as well.
-- **Game folders** can hold mods or their settings you may want to keep for a reinstall, and a few games keep saves there.
-- **Steam running:** before resetting the data of an installed game, the app warns you if Steam is running. Close the game first.
+- **Game folders** can hold mods or their settings you may want to keep for a reinstall, and a few games keep saves there. A game you copied into `steamapps/common` yourself (not through Steam) is listed too, so untick it if you want to keep it.
+- **Steam running:** the app warns you if Steam is running. Close Steam (or at least the game) first: a game Steam is installing or moving at that moment could look like a leftover.
+- **Safety checks:** the app only ever deletes folders directly inside a Steam library's `compatdata`, `shadercache` or `common` folder. If one of Steam's records for installed games is damaged, it lists no game folders of that library at all, and games Steam lists on an unplugged drive are never offered.
 
 ## Updates
 
@@ -115,6 +116,8 @@ Version numbers work like this: the last number goes up for fixes (1.1.0 → 1.1
 - **"zenity is needed":** install zenity, or use `--list` in a terminal to see the leftovers without the windows.
 - **Games show only a number:** python3 is missing, so the app can't read game names from Steam's cache. Leftovers can still be removed.
 - **An installed game shows up as a leftover:** its library is probably on a drive that isn't connected. The app warns you about this before scanning; plug the drive in and scan again.
+- **A drive you no longer use is reported as unreachable:** Steam still lists it, and the app keeps that drive's games protected. Remove the drive in Steam (Settings → Storage) to clear it.
+- **No game folders are listed for a library:** one of Steam's records there (`appmanifest_*.acf`) is empty or damaged. Starting Steam usually repairs it.
 - **Something else:** please [open an issue](https://github.com/vold-source/Proton-Leftover-Cleaner/issues).
 
 ## How it's built
@@ -128,6 +131,14 @@ bash packaging/appimage/build.sh   # → build/Proton_Leftover_Cleaner-<version>
 ```
 
 The `build` folder also gets a `.sha256` checksum and a `.zsync` file (used by AppImage updaters). The version number comes from `APP_VERSION` in the script.
+
+### Tests
+
+[`tests/run-tests.sh`](tests/run-tests.sh) checks the riskiest behaviour: that installed games, links inside prefixes, non-Steam games still in Steam and games on unplugged drives are never removed, that cancelling removes nothing, and that `--list` deletes nothing. Every test builds a fake Steam setup in a fresh temporary folder and answers the windows with a stand-in for zenity, so real Steam data is never touched. The release workflow runs the tests before every build.
+
+```sh
+bash tests/run-tests.sh
+```
 
 ## License
 

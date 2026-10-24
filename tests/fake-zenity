@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+# Stand-in for zenity, used only by the tests. It never shows a window: it
+# writes every dialog it gets into a log file and answers like a user who
+# accepts everything (OK / Remove / Continue), unless the test asks otherwise:
+#   FAKE_ZENITY_LOG        log file (required)
+#   FAKE_ZENITY_QUESTION   exit code for yes/no questions (0 = yes, 1 = cancel)
+#   FAKE_ZENITY_CHECKLIST  "cancel" closes the leftovers list without choosing
+#   FAKE_ZENITY_MENU       answer for the main window
+#   FAKE_ZENITY_GAME       App ID picked in the installed games list
+#   FAKE_ZENITY_WHAT       answer for "What should be removed?"
+import os
+import sys
+
+args = sys.argv[1:]
+env = os.environ.get
+log = open(env("FAKE_ZENITY_LOG"), "a", encoding="utf-8")
+
+
+def option(name):
+    for arg in args:
+        if arg.startswith("--" + name + "="):
+            return arg.split("=", 1)[1]
+    return ""
+
+
+def kind():
+    for k in ("progress", "question", "info", "error", "checklist", "list"):
+        if "--" + k in args:
+            return k
+    return "other"
+
+
+k = kind()
+log.write("%s: %s\n" % (k.upper(), option("text")))
+
+if k == "progress":
+    sys.stdin.read()
+    sys.exit(0)
+if k == "question":
+    sys.exit(int(env("FAKE_ZENITY_QUESTION", "0")))
+if k in ("info", "error"):
+    sys.exit(0)
+if k == "checklist":
+    if env("FAKE_ZENITY_CHECKLIST") == "cancel":
+        sys.exit(1)
+    rows = [a for a in args if not a.startswith("--")]
+    picked = []
+    for i in range(0, len(rows) - 5, 6):
+        tick, name, app_id, data, size, n = rows[i:i + 6]
+        log.write("ROW: %s | %s | %s | %s\n" % (tick, name, app_id, data))
+        if tick == "TRUE":
+            picked.append(n)
+    print(" ".join(picked))
+    sys.exit(0)
+if k == "list":
+    title = option("title")
+    if title == "Installed games":
+        print(env("FAKE_ZENITY_GAME", ""))
+    elif option("text").startswith("What would you like"):
+        print(env("FAKE_ZENITY_MENU", "Leftovers of uninstalled games"))
+    else:
+        print(env("FAKE_ZENITY_WHAT", "Shader cache"))
+    sys.exit(0)
+sys.exit(0)
