@@ -1,2 +1,6 @@
 # Build output
 /build/
+
+# Claude Code's own settings folder. Its "Don't ask again" file can hold
+# approved commands, sometimes with passwords in them, so it must never be committed.
+/.claude/
